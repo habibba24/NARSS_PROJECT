@@ -28,13 +28,32 @@ def demo(image_path: str):
     pipeline = CoralDamagePipeline()
     findings = pipeline.run(image_path)
 
-    image = Image.open(image_path).convert("RGB")
-    draw = ImageDraw.Draw(image)
+    base = Image.open(image_path).convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    box_draw = ImageDraw.Draw(base)
+
     for f in findings:
         color = DAMAGE_COLORS.get(f.damage_type, (255, 255, 0))
         x0, y0, x1, y1 = f.colony_box_xyxy
-        draw.rectangle([x0, y0, x1, y1], outline=color, width=3)
-        draw.text((x0, max(0, y0 - 12)), f"{f.damage_type} ({f.colony_genus}) {f.confidence:.2f}", fill=color)
+
+        # the actual segmentation result, not just the colony box it lives inside
+        if f.damage_type == "bleaching" and "mask" in f.detail:
+            mask = f.detail["mask"]  # crop-relative HxW bool array
+            patch = Image.fromarray((mask * 160).astype(np.uint8), mode="L")
+            tint = Image.new("RGBA", patch.size, color + (0,))
+            tint.putalpha(patch)
+            overlay.paste(tint, (int(x0), int(y0)), tint)
+        elif f.damage_type == "algae" and "polygon_crop_coords" in f.detail:
+            pts = [(x0 + px, y0 + py) for px, py in f.detail["polygon_crop_coords"]]
+            if len(pts) >= 3:
+                overlay_draw.polygon(pts, fill=color + (110,))
+
+        # colony box stays as thin context, not the finding itself
+        box_draw.rectangle([x0, y0, x1, y1], outline=color, width=2)
+        box_draw.text((x0, max(0, y0 - 12)), f"{f.damage_type} ({f.colony_genus}) {f.confidence:.2f}", fill=color)
+
+    image = Image.alpha_composite(base, overlay).convert("RGB")
 
     DEMO_OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = DEMO_OUT_DIR / f"{Path(image_path).stem}_annotated.jpg"

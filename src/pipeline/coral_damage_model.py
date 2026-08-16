@@ -135,7 +135,8 @@ class CoralDamagePipeline:
         genus_idx = torch.tensor([self.bleaching_module.genus_names.index(genus)])
         out = self.bleaching_module(tensor, genus_idx)
         score_map = out["paling_score"][0]
-        bleached_fraction = out["mask"][0].float().mean().item()
+        mask = out["mask"][0]
+        bleached_fraction = mask.float().mean().item()
         if bleached_fraction > self.bleaching_fraction_cutoff:
             return [
                 DamageFinding(
@@ -143,7 +144,13 @@ class CoralDamagePipeline:
                     colony_box_xyxy=colony_box,
                     colony_genus=genus,
                     confidence=bleached_fraction,
-                    detail={"mean_paling_score": float(score_map.mean()), "mask_shape": list(score_map.shape)},
+                    detail={
+                        "mean_paling_score": float(score_map.mean()),
+                        # the actual per-pixel result, crop-relative (HxW bool) -
+                        # this is the segmentation output itself, not a summary of it.
+                        "mask": mask.numpy(),
+                        "paling_score_map": score_map.numpy(),
+                    },
                 )
             ]
         return []
